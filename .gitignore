@@ -1,0 +1,47 @@
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Claude Code local config and worktrees (not project source)
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+.Python
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.ty/
+.hypothesis/
+.coverage
+.coverage.*
+
+# Virtual environments (uv + conventional)
+.venv/
+env/
+
+# Secrets / local env
+.env
+.env.*
+# ...except the template, which carries no secret and is how a new clone knows what to set.
+!.env.example
+
+# Benchmark output. Two roots, because ADR-0027 gave the converted artifact a life longer
+# than the run that wrote it: `results/` gains one small run directory per run, `artifacts/`
+# holds the converted copies and is the large one. Both are machine-specific, and a result is
+# published by hand rather than committed.
+results/
+artifacts/
+
+# Local agent tooling
+.codex/
+.claude-flow/
+.atlas/loop/
+.atlas/worktrees/

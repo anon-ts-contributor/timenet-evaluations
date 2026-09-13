@@ -1,0 +1,73 @@
+[project]
+name = "timenet-evaluations"
+version = "0.1.0"
+description = "A comparative benchmark: how long the same time-series dataset takes to read, and what it costs on disk, as the release ships it and converted to TimeF, through both pandas and torch."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12,<3.14"
+authors = [{ name = "The TimeNet-Evaluations authors" }]
+keywords = ["time-series", "benchmark", "timef", "parquet", "torch"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
+]
+dependencies = [
+    # pyhealth is the sleep-edfx connector's dependency, and it is the only reason this package
+    # supports >=3.12,<3.14. The range is narrower than timenet's on pyhealth's account alone, so
+    # the cost of one connector is borne by every capability here, including the ones that never
+    # touch a dataset. A second connector needing a wider range would have to widen this.
+    "pyhealth>=2.0.0",
+    "pandas>=2.0",
+    # The sleep-edfx release ships its subject table as a legacy BIFF8 `.xls`, which pandas reads
+    # only through xlrd and which openpyxl cannot open at all. PyHealth reads that table to build
+    # its metadata, so without this the one connector that ships cannot load its dataset — the
+    # failure is an ImportError from inside pandas, several frames below anything this package
+    # wrote. It is a dependency and not an extra because it is the `Original` side of the grid,
+    # which a run measures with or without the subject under test.
+    "xlrd>=2.0",
+    "torch",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+# The format under test. It is an extra rather than a dependency because it resolves from a private
+# repository, and continuous integration must be able to build and check this package without one.
+# A run still refuses to proceed without it: a benchmark missing its own subject is not a benchmark.
+timef = [
+    "timenet[build]>=0.1.0",
+    # The connectors distribution versions independently of timenet and is at 0.0.1, so the floor is
+    # its own rather than a copy of the one above.
+    "timenet-connectors>=0.0.1",
+]
+
+[project.scripts]
+timenet-evaluations = "timenet_evaluations.cli:main"
+
+[tool.uv.sources]
+# Dev-time override so the workspace resolves timenet from its own repository, pinned to the exact
+# commit this harness was written against. The pin is the point: a benchmark whose subject moves
+# under it is not reproducible, so bump this rev deliberately and re-run, never incidentally.
+#
+# HTTPS rather than SSH so that one URL works in both places, with the credential supplied
+# differently: a developer's git credential helper, or the rewrite `make configure-source` writes
+# from TIMENET_SOURCE_TOKEN. An ssh:// URL cannot be given a token at all.
+#
+# This is uv-only and never reaches published metadata; Requires-Dist comes from the floor above.
+#
+# Both distributions come from one repository at one revision, per ADR-0028. They are built from the
+# same commit, so they move together or not at all: a bump edits both `rev` values in one change,
+# and `test_pinned_revisions_agree` fails a harness assembled from two commits.
+timenet = { git = "https://github.com/OpenTSLM/TimeNet.git", subdirectory = "packages/timenet", rev = "dec2effd60666e95a4d6e4778380785cc11dfcde" }
+timenet-connectors = { git = "https://github.com/OpenTSLM/TimeNet.git", subdirectory = "packages/timenet-connectors", rev = "dec2effd60666e95a4d6e4778380785cc11dfcde" }
+
+[build-system]
+requires = ["uv_build>=0.12.6,<0.13.0"]
+build-backend = "uv_build"

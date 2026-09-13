@@ -1,0 +1,138 @@
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv]
+default-groups = ["dev"]
+required-version = ">=0.10.10"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.0",
+    "pydantic-settings>=2.6",
+    "pytest>=9.0.3",
+    "ruff>=0.15.12",
+    "ty>=0.0.34",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+# Members live under packages/*/src; the glob makes isort treat each package as
+# first-party. Config is discovered from the repo root, not shared by uv.
+src = ["packages/*/src"]
+
+[tool.ruff.format]
+# quote-style (double) and indent-style (space) are ruff's defaults; only the non-default is set here.
+docstring-code-format = true
+
+[tool.ruff.lint]
+# Required for the DOC (pydoclint) rules, which are still in preview.
+preview = true
+select = [
+    "SIM",    # flake8-simplify — simplify needlessly verbose code
+    "C4",     # flake8-comprehensions — better list/set/dict comprehensions
+    "PIE",    # flake8-pie — misc lints (unnecessary pass, dup class fields)
+    "RET",    # flake8-return — consistent return statements
+    "PTH",    # flake8-use-pathlib — prefer pathlib over os.path
+    "ARG",    # flake8-unused-arguments — flag unused function arguments
+    "ASYNC",  # flake8-async — async/await pitfalls
+    "UP",     # pyupgrade — modern Python syntax
+    "RUF",    # Ruff-specific rules
+    "E",      # pycodestyle errors
+    "N",      # pep8-naming — naming conventions
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes — undefined names, unused imports
+    "I",      # isort — import sorting
+    "B",      # flake8-bugbear — likely bugs and design problems
+    "S",      # flake8-bandit — security issues
+    "D",      # pydocstyle — docstring presence and formatting
+    "DOC",    # pydoclint — args/returns match signatures
+    "PL",     # Pylint — error/warning/convention rules (opinionated metrics dropped in `ignore`)
+]
+ignore = [
+    "line-too-long",  # Line too long — handled by the formatter
+    "undocumented-param",  # Don't require documentation for every function parameter
+    "undocumented-magic-method",  # Missing docstring in magic method
+    "undocumented-public-init",  # Missing docstring in __init__
+    "superfluous-else-return",  # Allow elif/else after a return, for explicit if/elif/else branching
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Pytest uses bare asserts by design; token-like literals in tests are fixtures.
+# Don't require docstrings for test modules and functions. Pickle round-trips are intentional
+# (they prove serializability), and we deserialize only our own freshly-pickled objects.
+# Tests legitimately import private helpers to exercise them, assert self-equality, compare to "",
+# call context-manager dunders directly, and compare against literal fixture values. Async test
+# stubs must be `async` for their interface even when their body doesn't await (unused-async).
+# Ruff 0.16 requires rule names rather than codes in this table; the codes are in the spec block.
+# scripts/ holds developer tooling, not shipped code. It shells out to command-line tools by
+# name on PATH, which is the point of it; the arguments are built here, never taken from input.
+"scripts/*.py" = ["suspicious-subprocess-import", "subprocess-without-shell-equals-true", "start-process-with-partial-path"]
+# cli.py's `run_evaluation` takes the six arguments SPEC-0021 § The Argument Surface fixes: the
+# dataset list, the output root, and the four run parameters whose defaults its signature must
+# carry, so that a library caller who omits them gets what the command line would have given it.
+# PLR0913's limit of five is a shape rule and that signature is a specification, so the rule loses
+# here. The repository conventions forbid an inline `noqa`; this entry is scoped to one file and
+# says why, and the two entries around it are the precedent.
+#
+# `too-many-locals` loses to the same specification, for a sharper reason. SPEC-0021 § The Run
+# Sequence Is Fixed and Ordered requires the run to be one function performing nineteen steps in
+# order, with no helper functions, no phases object and no dispatch. That is not a preference: five
+# requirements of that spec are properties of the order those steps run in, and a sequence split
+# across helpers has no order left to assert. The steps name what they produce, so the count of
+# locals is the count of steps, and PLR0914's limit of fifteen is a complexity heuristic aimed at
+# functions that grew by accident. This one is specified line by line and is tested by a syntax-tree
+# audit that reads the order back out of it. Splitting it to satisfy the heuristic would delete the
+# thing the tests check.
+"packages/timenet-evaluations/src/timenet_evaluations/cli.py" = ["too-many-arguments", "too-many-locals"]
+# harness/drop.py drops the page cache, which is privileged, machine-wide and platform-specific.
+# There is no way to do it from inside the interpreter, so the module runs the platform's own
+# command: S404 (suspicious-subprocess-import) and S603 (subprocess-without-shell-equals-true) are
+# unavoidable for a module whose whole job is to run one. The argv is built in the module from two
+# fixed constants and is never taken from input, and both programs are named by absolute path, so
+# S607 does not fire and is deliberately not listed here. The repository conventions forbid an
+# inline `noqa` because a suppression at the call site is invisible to review; this entry is
+# scoped to one file and says why, which is the opposite, and `scripts/*.py` above is the
+# precedent.
+"packages/timenet-evaluations/src/timenet_evaluations/harness/drop.py" = ["suspicious-subprocess-import", "subprocess-without-shell-equals-true"]
+"**/tests/**/*.py" = ["assert", "hardcoded-password-string", "hardcoded-password-func-arg", "D", "DOC", "suspicious-pickle-usage", "suspicious-pickle-import", "suspicious-subprocess-import", "subprocess-without-shell-equals-true", "ARG", "blocking-path-method-in-async-function", "import-private-name", "comparison-with-itself", "compare-to-empty-string", "unnecessary-dunder-call", "magic-value-comparison", "no-self-use", "unused-async"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+force-sort-within-sections = true
+lines-after-imports = 2
+
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib", "--strict-markers"]
+testpaths = ["packages"]
+
+[tool.ty.rules]
+# `timenet` is the timef extra, not a dependency, so formats/timef.py resolves in a developer's
+# environment and does not resolve in the one CI builds. Its imports carry
+# `# ty: ignore[unresolved-import]` for the second case, which makes them unused in the first.
+# Whichever way this rule fired it would be wrong half the time, so it is off: the suppressions are
+# deliberate and their reason is written at the top of that module.
+unused-ignore-comment = "ignore"
+
+[tool.ty.environment]
+# The member's floor, not the pinned development interpreter. SPEC-0009 permits either this or a
+# lowest-version CI job; both are in place, so a type error that only appears on 3.12 is caught here.
+python-version = "3.12"
+
+[[tool.ty.overrides]]
+# .github/scripts/** declares its dependencies inline (PEP 723) and runs standalone under `uv run`
+# (PyGithub for the CI report). It is not a project dependency, so don't fail type-checking on its
+# unresolved imports.
+#
+# ty 0.0.78 does not actually apply this override to `unresolved-import`: that diagnostic is emitted
+# during module resolution, before per-file rule overrides are consulted, and no include pattern
+# suppresses it. The import therefore also carries an inline `# ty: ignore[unresolved-import]`.
+# Drop the inline suppression once ty honours the override; keep this block either way, so a second
+# PEP 723 script directory is covered the moment it is added here.
+include = [".github/scripts/**"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"

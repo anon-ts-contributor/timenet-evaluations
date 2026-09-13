@@ -1,0 +1,101 @@
+name: Pre-commit hooks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# Cancel a superseded run so two runs can't race to rewrite the sticky comment.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v8.2.0
+      with:
+        enable-cache: true
+        prune-cache: false
+        cache-suffix: py313
+    - name: Cache pre-commit environments
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/pre-commit
+        key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+    - name: Install dependencies
+      # `make sync-ci`, not `make sync`: the only extra is `timef`, and it resolves `timenet` from a
+      # private repository. Omitting extras keeps this job free of any credential, which is what
+      # lets a pull request from a fork run the same checks as one from a branch.
+      #
+      # The consequence is deliberate and worth stating: the format under test is absent here, so
+      # its round-trip tests skip. CI gates the harness's correctness, never the subject's.
+      run: make sync-ci
+    # The four checks below run to completion even when one fails, so the report lists every
+    # outcome instead of stopping at the first. The final step decides the job's verdict, and every
+    # step it gates has a row in the report - keep those two lists identical.
+    - name: Run pre-commit hooks
+      # Scoped to this pull request's commit range, so a file the change never touched cannot turn
+      # it red. A local `pre-commit run --all-files` is therefore the wider check, not the same one.
+      id: precommit
+      continue-on-error: true
+      run: |
+        uv run pre-commit run \
+          --from-ref origin/${{ github.base_ref }} \
+          --to-ref ${{ github.sha }} \
+          --show-diff-on-failure
+    - name: Restore the working tree
+      # Undo pre-commit's in-place fixes so pytest sees the PR's source. Never `git clean` (venv).
+      run: git checkout -- .
+    - name: Test with pytest (Python 3.13)
+      id: pytest
+      continue-on-error: true
+      run: make test
+    - name: Check dependency licenses
+      # Fail the build if a copyleft or undeclared-licence dependency enters the scanned
+      # environment. Runs against the 3.13 sync, and is both gated and reported below.
+      id: license
+      continue-on-error: true
+      run: make license-check
+    - name: Test with pytest (Python 3.12)
+      # Guard the minimum supported Python; the steps above run on 3.13. The member declares
+      # requires-python = ">=3.12,<3.14", so 3.12 is the floor, not 3.11. Re-syncs the venv, so it
+      # has to come after the 3.13 run.
+      #
+      # This re-downloads the cp312 wheels on every run (a few hundred MB). The uv cache is keyed
+      # py313 and setup-uv skips saving on a key hit, so the cp312 wheels can never persist.
+      # Splitting 3.12 into its own job with cache-suffix: py312 would fix it, at the cost of the
+      # single-job report below losing its per-step granularity. Accepted deliberately: keep the one
+      # job.
+      id: pytestmin
+      continue-on-error: true
+      # UV_PYTHON threads the interpreter through `make sync-ci` and `make test`.
+      run: UV_PYTHON=3.12 make sync-ci && UV_PYTHON=3.12 make test
+    - name: Report
+      # Skipped on forks, whose token has no pull-requests: write. A transient comment-API error
+      # must never turn a passing run red, hence continue-on-error; the verdict is the step below.
+      #
+      # One variable per gated step. A gated step with no variable here fails only in the logs, so
+      # this env block and the condition below are added to together, in the same change.
+      if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository }}
+      continue-on-error: true
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        PR: ${{ github.event.pull_request.number }}
+        PRECOMMIT: ${{ steps.precommit.outcome }}
+        PYTEST: ${{ steps.pytest.outcome }}
+        LICENSE: ${{ steps.license.outcome }}
+        PYTEST_MIN: ${{ steps.pytestmin.outcome }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: uv run .github/scripts/ci_report.py
+    - name: Fail if any check failed
+      if: steps.precommit.outcome == 'failure' || steps.pytest.outcome == 'failure' || steps.license.outcome == 'failure' || steps.pytestmin.outcome == 'failure'
+      run: exit 1
